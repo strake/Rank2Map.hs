@@ -37,9 +37,9 @@ import Util.Private (Endo (..))
 class Rank2.Traversable map => StaticMap (map :: (κ -> Type) -> Type) where
     type Key map :: κ -> Type
     -- | Modify the value of the key in the map. If the key is absent, the map is returned unmodified.
-    adjustA :: Applicative p => (a k -> p (a k)) -> Key map k -> map a -> p (map a)
+    adjustA :: (Applicative p, Typeable k) => (a k -> p (a k)) -> Key map k -> map a -> p (map a)
     -- | Traverse a function over each value in the map.
-    traverseWithKey :: (Applicative p) => (Key map k -> a k -> p (b k)) -> map a -> p (map b)
+    traverseWithKey :: (Applicative p) => (∀ k . Typeable k => Key map k -> a k -> p (b k)) -> map a -> p (map b)
 
 -- | Class of key-value maps with variable structure
 class (Rank2.Filtrable map, StaticMap map) => Map (map :: (κ -> Type) -> Type) where
@@ -50,22 +50,22 @@ class (Rank2.Filtrable map, StaticMap map) => Map (map :: (κ -> Type) -> Type) 
     -- @fmap ('!?' k) . 'alterF' f k = f . ('!?' k)@
     --
     -- This is the most general operation on a given key in the map.
-    alterF :: Functor f => (Maybe (a k) -> f (Maybe (a k))) -> Key map k -> map a -> f (map a)
+    alterF :: (Functor f, Typeable k) => (Maybe (a k) -> f (Maybe (a k))) -> Key map k -> map a -> f (map a)
     -- | Combine two maps with the given function, which is called once for each key present in either map, inclusive.
-    mergeA :: Applicative p => (Key map k -> Either' (a k) (b k) -> p (Maybe (c k))) -> map a -> map b -> p (map c)
+    mergeA :: (Applicative p) => (∀ k . Typeable k => Key map k -> Either' (a k) (b k) -> p (Maybe (c k))) -> map a -> map b -> p (map c)
     -- | Traverse a function over each value in the map, gathering the 'Just' values and forgetting the 'Nothing'.
-    mapMaybeWithKeyA :: Applicative p => (Key map k -> a k -> p (Maybe (b k))) -> map a -> p (map b)
+    mapMaybeWithKeyA :: (Applicative p) => (∀ k . Typeable k => Key map k -> a k -> p (Maybe (b k))) -> map a -> p (map b)
     -- | Traverse a function over each value in the map, gathering the 'Left' and 'Right' values separately.
-    mapEitherWithKeyA :: Applicative p => (Key map k -> a k -> p (Either (b k) (c k))) -> map a -> p (map b, map c)
+    mapEitherWithKeyA :: (Applicative p) => (∀ k . Typeable k => Key map k -> a k -> p (Either (b k) (c k))) -> map a -> p (map b, map c)
     mapEitherWithKeyA f = liftA2 (,) <$> mapMaybeWithKeyA (fmap (Just `either` pure Nothing) ∘∘ f)
                                      <*> mapMaybeWithKeyA (fmap (pure Nothing `either` Just) ∘∘ f)
 
 -- | Default implementation of `adjustA` in terms of `Map` methods
-defaultAdjustA :: (Map map, Applicative p) => (a k -> p (a k)) -> Key map k -> map a -> p (map a)
+defaultAdjustA :: (Map map, Applicative p, Typeable k) => (a k -> p (a k)) -> Key map k -> map a -> p (map a)
 defaultAdjustA f = alterF (traverse f)
 
 -- | Default implementation of `traverseWithKey` in terms of `Map` methods
-defaultTraverseWithKey :: (Map map, Applicative p) => (Key map k -> a k -> p (b k)) -> map a -> p (map b)
+defaultTraverseWithKey :: (Map map, Applicative p) => (∀ k . Typeable k => Key map k -> a k -> p (b k)) -> map a -> p (map b)
 defaultTraverseWithKey f = mapMaybeWithKeyA (fmap Just ∘∘ f)
 
 instance (StaticMap m, StaticMap n) => StaticMap (Product m n) where
@@ -86,103 +86,103 @@ instance (Map m, Map n) => Map (Product m n) where
 
 -- | Look up the key in the map.
 infix 9 !?
-(!?) :: StaticMap map => map a -> Key map k -> Maybe (a k)
+(!?) :: (StaticMap map, Typeable k) => map a -> Key map k -> Maybe (a k)
 (!?) = flip $ getLast ∘∘ fst ∘∘ adjustA ((,) <$> Last . Just <*> id)
 
 -- | Insert a key and new value into the map, the new value clobbering the old if the key is already present.
 -- @'insert' = 'insertWith' 'pure'@
-insert :: Map map => Key map k -> a k -> map a -> map a
+insert :: (Map map, Typeable k) => Key map k -> a k -> map a -> map a
 insert = insertWith pure
 
 -- | Insert a key and new value into the map, combining the old and new values with the given function if the key is already present.
-insertWith :: Map map => (a k -> a k -> a k) -> Key map k -> a k -> map a -> map a
+insertWith :: (Map map, Typeable k) => (a k -> a k -> a k) -> Key map k -> a k -> map a -> map a
 insertWith f = flip $ \ a -> alter (Just . maybe a (f a))
 
 -- | Insert a key and new value into the map, looking up the old value if the key is already present.
-insertLookup :: Map map => Key map k -> a k -> map a -> (Maybe (a k), map a)
+insertLookup :: (Map map, Typeable k) => Key map k -> a k -> map a -> (Maybe (a k), map a)
 insertLookup = insertLookupWith pure
 
 -- | Insert a key and new value into the map, looking up the old value and combining the old and new values with the given function if the key is already present.
-insertLookupWith :: Map map => (a k -> a k -> a k) -> Key map k -> a k -> map a -> (Maybe (a k), map a)
+insertLookupWith :: (Map map, Typeable k) => (a k -> a k -> a k) -> Key map k -> a k -> map a -> (Maybe (a k), map a)
 insertLookupWith f = flip $ \ a -> alterLookup (Just . maybe a (f a))
 
 -- | Delete a key and its value from the map. If the key is absent, the map is returned unmodified.
-delete :: Map map => Key map k -> map a -> map a
+delete :: (Map map, Typeable k) => Key map k -> map a -> map a
 delete = alter (pure Nothing)
 
 -- | Modify the value of the key in the map. If the key is absent, the map is returned unmodified.
-adjust :: StaticMap map => (a k -> a k) -> Key map k -> map a -> map a
+adjust :: (StaticMap map, Typeable k) => (a k -> a k) -> Key map k -> map a -> map a
 adjust f = runIdentity ∘∘ adjustA (pure . f)
 
 -- | Modify the value of the key in the map, or delete the key and its value from the map, if the given function returns 'Just' or 'Nothing', in turn. If the key is absent, the map is returned unmodified.
-update :: Map map => (a k -> Maybe (a k)) -> Key map k -> map a -> map a
+update :: (Map map, Typeable k) => (a k -> Maybe (a k)) -> Key map k -> map a -> map a
 update f = alter (>>= f)
 
 -- | Modify the value of the key in the map, or delete the key and its value from the map, if the given function returns 'Just' or 'Nothing', in turn, looking up the old value if the key is already present. If the key is absent, the map is returned unmodified.
-updateLookup :: Map map => (a k -> Maybe (a k)) -> Key map k -> map a -> (Maybe (a k), map a)
+updateLookup :: (Map map, Typeable k) => (a k -> Maybe (a k)) -> Key map k -> map a -> (Maybe (a k), map a)
 updateLookup f = alterLookup (>>= f)
 
 -- | Modify the value of the key in the map, or insert the key and its value into the map, or delete the key and its value from the map.
-alter :: Map map => (Maybe (a k) -> Maybe (a k)) -> Key map k -> map a -> map a
+alter :: (Map map, Typeable k) => (Maybe (a k) -> Maybe (a k)) -> Key map k -> map a -> map a
 alter f = runIdentity ∘∘ alterF (Identity . f)
 
 -- | Modify the value of the key in the map, or insert the key and its value into the map, or delete the key and its value from the map, looking up the old value if the key is already present.
-alterLookup :: Map map => (Maybe (a k) -> Maybe (a k)) -> Key map k -> map a -> (Maybe (a k), map a)
+alterLookup :: (Map map, Typeable k) => (Maybe (a k) -> Maybe (a k)) -> Key map k -> map a -> (Maybe (a k), map a)
 alterLookup f = alterF ((,) <*> f)
 
 -- | Modify the value of the key in the map, or insert the key and its value into the map, or delete the key and its value from the map, looking up the old value if the key is already present, functorially.
 --
 -- This is no more general than `alterF`, but is defined for convenience.
-alterLookupF :: (Map map, Functor f) => (Maybe (a k) -> f (Maybe (a k))) -> Key map k -> map a -> f (Maybe (a k), map a)
+alterLookupF :: (Map map, Functor f, Typeable k) => (Maybe (a k) -> f (Maybe (a k))) -> Key map k -> map a -> f (Maybe (a k), map a)
 alterLookupF f = getCompose ∘∘ alterF (Compose ∘ liftA2 fmap (,) f)
 
 -- | Map a function over each value in the map.
-mapWithKey :: StaticMap map => (∀ k . Key map k -> a k -> b k) -> map a -> map b
+mapWithKey :: StaticMap map => (∀ k . Typeable k => Key map k -> a k -> b k) -> map a -> map b
 mapWithKey f = runIdentity . traverseWithKey (Identity ∘∘ f)
 
 -- | Map a function over each value in the map, gathering the 'Just' values and forgetting the 'Nothing'.
-mapMaybeWithKey :: Map map => (∀ k . Key map k -> a k -> Maybe (b k)) -> map a -> map b
+mapMaybeWithKey :: Map map => (∀ k . Typeable k => Key map k -> a k -> Maybe (b k)) -> map a -> map b
 mapMaybeWithKey f = runIdentity . mapMaybeWithKeyA (pure ∘∘ f)
 
 -- | Map a function over each value in the map, gathering the 'Left' and 'Right' separately.
-mapEitherWithKey :: Map map => (∀ k . Key map k -> a k -> Either (b k) (c k)) -> map a -> (map b, map c)
+mapEitherWithKey :: Map map => (∀ k . Typeable k => Key map k -> a k -> Either (b k) (c k)) -> map a -> (map b, map c)
 mapEitherWithKey f = runIdentity . mapEitherWithKeyA (pure ∘∘ f)
 
-foldMapWithKeyA :: (StaticMap map, Applicative p, Monoid b) => (∀ k . Key map k -> a k -> p b) -> map a -> p b
+foldMapWithKeyA :: (StaticMap map, Applicative p, Monoid b) => (∀ k . Typeable k => Key map k -> a k -> p b) -> map a -> p b
 foldMapWithKeyA f = fmap getConst . getCompose . traverseWithKey (Compose ∘∘ fmap Const ∘∘ f)
 
-foldrWithKeyM :: (StaticMap map, Monad m) => (∀ k . Key map k -> a k -> b -> m b) -> b -> map a -> m b
+foldrWithKeyM :: (StaticMap map, Monad m) => (∀ k . Typeable k => Key map k -> a k -> b -> m b) -> b -> map a -> m b
 foldrWithKeyM f = flip $ runKleisli . appEndo . foldMapWithKey (Endo ∘∘ Kleisli ∘∘ f)
 
-foldlWithKeyM :: (StaticMap map, Monad m) => (∀ k . b -> Key map k -> a k -> m b) -> b -> map a -> m b
+foldlWithKeyM :: (StaticMap map, Monad m) => (∀ k . Typeable k => b -> Key map k -> a k -> m b) -> b -> map a -> m b
 foldlWithKeyM f = flip $ runKleisli . appEndo . getDual . foldMapWithKey (Dual ∘∘ Endo ∘∘ Kleisli ∘∘ \ k a b -> f b k a)
 
-foldMapWithKey :: (StaticMap map, Monoid b) => (∀ k . Key map k -> a k -> b) -> map a -> b
+foldMapWithKey :: (StaticMap map, Monoid b) => (∀ k . Typeable k => Key map k -> a k -> b) -> map a -> b
 foldMapWithKey f = runIdentity . foldMapWithKeyA (pure ∘∘ f)
 
-foldrWithKey :: StaticMap map => (∀ k . Key map k -> a k -> b -> b) -> b -> map a -> b
+foldrWithKey :: StaticMap map => (∀ k . Typeable k => Key map k -> a k -> b -> b) -> b -> map a -> b
 foldrWithKey f = flip $ appEndo . foldMapWithKey (Endo ∘∘ f)
 
-foldlWithKey :: StaticMap map => (∀ k . b -> Key map k -> a k -> b) -> b -> map a -> b
+foldlWithKey :: StaticMap map => (∀ k . Typeable k => b -> Key map k -> a k -> b) -> b -> map a -> b
 foldlWithKey f = flip $ appEndo . getDual . foldMapWithKey (Dual ∘∘ Endo ∘∘ \ k a b -> f b k a)
 
 fromList :: Map map => [E Unconstrained1 (Product (Key map) a)] -> map a
 fromList = fromListWith pure
 
-fromListWith :: Map map => (∀ k . a k -> a k -> a k) -> [E Unconstrained1 (Product (Key map) a)] -> map a
+fromListWith :: Map map => (∀ k . Typeable k => a k -> a k -> a k) -> [E Unconstrained1 (Product (Key map) a)] -> map a
 fromListWith f = fromListWithKey (pure f)
 
-fromListWithKey :: Map map => (∀ k . Key map k -> a k -> a k -> a k) -> [E Unconstrained1 (Product (Key map) a)] -> map a
+fromListWithKey :: Map map => (∀ k . Typeable k => Key map k -> a k -> a k -> a k) -> [E Unconstrained1 (Product (Key map) a)] -> map a
 fromListWithKey f = Foldable.foldr (\ (E (Pair k a)) -> insertWith (f k) k a) empty
 
-fromListWithM :: (Map map, Monad m) => (∀ k . a k -> a k -> m (a k)) -> [E Unconstrained1 (Product (Key map) a)] -> m (map a)
+fromListWithM :: (Map map, Monad m) => (∀ k . Typeable k => a k -> a k -> m (a k)) -> [E Unconstrained1 (Product (Key map) a)] -> m (map a)
 fromListWithM f = fromListWithKeyM (pure f)
 
-fromListWithKeyM :: (Map map, Monad m) => (∀ k . Key map k -> a k -> a k -> m (a k)) -> [E Unconstrained1 (Product (Key map) a)] -> m (map a)
+fromListWithKeyM :: (Map map, Monad m) => (∀ k . Typeable k => Key map k -> a k -> a k -> m (a k)) -> [E Unconstrained1 (Product (Key map) a)] -> m (map a)
 fromListWithKeyM f = Rank2.sequence . fromListWithKey (\ k (Compose as) (Compose bs) -> Compose (bind2 (f k) as bs)) . fmap (E.map (\ (Pair k a) -> Pair k (Compose (pure a))))
 
 -- | Modify the value of the key in the map, looking up the old value if the key is already present. If the key is absent, the map is returned unmodified.
-adjustLookupA :: (StaticMap map, Applicative p) => (a k -> p (a k)) -> Key map k -> map a -> p (Maybe (a k), map a)
+adjustLookupA :: (StaticMap map, Applicative p, Typeable k) => (a k -> p (a k)) -> Key map k -> map a -> p (Maybe (a k), map a)
 adjustLookupA f = sequenceA ∘∘ (getLast *** id <<< getCompose) ∘∘ adjustA (\ a -> Compose (pure a, f a))
 
 -- | Map with a single element
@@ -190,23 +190,23 @@ singleton :: (Map map, Typeable k) => Key map k -> a k -> map a
 singleton k a = fromList [E (Pair k a)]
 
 -- | Union of two maps, combining values of the same key with the given function
-unionWith :: Map map => (∀ k . Key map k -> a k -> a k -> a k) -> map a -> map a -> map a
+unionWith :: Map map => (∀ k . Typeable k => Key map k -> a k -> a k -> a k) -> map a -> map a -> map a
 unionWith f = runIdentity ∘∘ unionWithA (\ k -> pure ∘∘ f k)
 
 -- | Intersection of two maps, combining values of the same key with the given function
-intersectionWith :: Map map => (∀ k . Key map k -> a k -> b k -> c k) -> map a -> map b -> map c
+intersectionWith :: Map map => (∀ k . Typeable k => Key map k -> a k -> b k -> c k) -> map a -> map b -> map c
 intersectionWith f = runIdentity ∘∘ intersectionWithA (\ k -> pure ∘∘ f k)
 
 -- | Combine two maps with the given function, which is called once for each key present in either map, inclusive.
-merge :: Map map => (∀ k . Key map k -> Either' (a k) (b k) -> Maybe (c k)) -> map a -> map b -> map c
+merge :: Map map => (∀ k . Typeable k => Key map k -> Either' (a k) (b k) -> Maybe (c k)) -> map a -> map b -> map c
 merge f = runIdentity ∘∘ mergeA (Identity ∘∘ f)
 
 -- | Union of two maps, combining values of the same key with the given function
-unionWithA :: (Map map, Applicative p) => (∀ k . Key map k -> a k -> a k -> p (a k)) -> map a -> map a -> p (map a)
+unionWithA :: (Map map, Applicative p) => (∀ k . Typeable k => Key map k -> a k -> a k -> p (a k)) -> map a -> map a -> p (map a)
 unionWithA f = mergeA (\ k -> \ case JustLeft a -> pure (Just a); JustRight a -> pure (Just a); Both a b -> Just <$> f k a b)
 
 -- | Intersection of two maps, combining values of the same key with the given function
-intersectionWithA :: (Map map, Applicative p) => (∀ k . Key map k -> a k -> b k -> p (c k)) -> map a -> map b -> p (map c)
+intersectionWithA :: (Map map, Applicative p) => (∀ k . Typeable k => Key map k -> a k -> b k -> p (c k)) -> map a -> map b -> p (map c)
 intersectionWithA f = mergeA (\ k -> \ case Both a b -> Just <$> f k a b; _ -> pure Nothing)
 
 -- | Difference of two maps, which contains exactly the keys present in the first map but absent in the second
@@ -218,35 +218,35 @@ symmetricDifference :: Map map => map a -> map a -> map a
 symmetricDifference = merge $ pure $ either' Just Just $ \ _ _ -> Nothing
 
 -- | Map a function over each key in the map.
-mapKeys :: (StaticMap m, Map n) => (∀ k . Key m k -> Key n k) -> m a -> n a
+mapKeys :: (StaticMap m, Map n) => (∀ k . Typeable k => Key m k -> Key n k) -> m a -> n a
 mapKeys f = foldrWithKey (insert . f) empty
 
 -- | Map a function over each key in the map, combining values of keys which collide with the given function.
-mapKeysWith :: (StaticMap m, Map n) => (∀ k . a k -> a k -> a k) -> (∀ k . Key m k -> Key n k) -> m a -> n a
+mapKeysWith :: (StaticMap m, Map n) => (∀ k . Typeable k => a k -> a k -> a k) -> (∀ k . Typeable k => Key m k -> Key n k) -> m a -> n a
 mapKeysWith combine f = foldrWithKey (insertWith combine . f) empty
 
 -- | Traverse a function over each key in the map.
-traverseKeys :: (StaticMap m, Map n, Applicative p) => (∀ k . Key m k -> p (Key n k)) -> m a -> p (n a)
+traverseKeys :: (StaticMap m, Map n, Applicative p) => (∀ k . Typeable k => Key m k -> p (Key n k)) -> m a -> p (n a)
 traverseKeys f = fmap (flip appEndo empty) . foldMapWithKeyA (\ i a -> (\ j -> Endo $ insert j a) <$> f i)
 
 -- | Traverse a function over each key in the map, combining values of keys which collide with the given function.
-traverseKeysWith :: (StaticMap m, Map n, Applicative p) => (∀ k . a k -> a k -> a k) -> (∀ k . Key m k -> p (Key n k)) -> m a -> p (n a)
+traverseKeysWith :: (StaticMap m, Map n, Applicative p) => (∀ k . Typeable k => a k -> a k -> a k) -> (∀ k . Typeable k => Key m k -> p (Key n k)) -> m a -> p (n a)
 traverseKeysWith combine f = fmap (flip appEndo empty) . foldMapWithKeyA (\ i a -> (\ j -> Endo $ insertWith combine j a) <$> f i)
 
 -- | Map a function over each key in the map, gathering the 'Just' values and forgetting the 'Nothing'.
-mapKeysMaybe :: (StaticMap m, Map n) => (∀ k . Key m k -> Maybe (Key n k)) -> m a -> n a
+mapKeysMaybe :: (StaticMap m, Map n) => (∀ k . Typeable k => Key m k -> Maybe (Key n k)) -> m a -> n a
 mapKeysMaybe f = runIdentity . traverseKeysMaybe (Identity . f)
 
 -- | Map a function over each key in the map, gathering the 'Just' values and forgetting the 'Nothing', combining values of keys which collide with the given function.
-mapKeysMaybeWith :: (StaticMap m, Map n) => (∀ k . a k -> a k -> a k) -> (∀ k . Key m k -> Maybe (Key n k)) -> m a -> n a
+mapKeysMaybeWith :: (StaticMap m, Map n) => (∀ k . Typeable k => a k -> a k -> a k) -> (∀ k . Typeable k => Key m k -> Maybe (Key n k)) -> m a -> n a
 mapKeysMaybeWith combine f = runIdentity . traverseKeysMaybeWith combine (Identity . f)
 
 -- | Traverse a function over each key in the map, gathering the 'Just' values and forgetting the 'Nothing'.
-traverseKeysMaybe :: (StaticMap m, Map n, Applicative p) => (∀ k . Key m k -> p (Maybe (Key n k))) -> m a -> p (n a)
+traverseKeysMaybe :: (StaticMap m, Map n, Applicative p) => (∀ k . Typeable k => Key m k -> p (Maybe (Key n k))) -> m a -> p (n a)
 traverseKeysMaybe f = fmap (flip appEndo empty) . foldMapWithKeyA (\ i a -> foldMap (\ j -> Endo $ insert j a) <$> f i)
 
 -- | Traverse a function over each key in the map, gathering the 'Just' values and forgetting the 'Nothing', combining values of keys which collide with the given function.
-traverseKeysMaybeWith :: (StaticMap m, Map n, Applicative p) => (∀ k . a k -> a k -> a k) -> (∀ k . Key m k -> p (Maybe (Key n k))) -> m a -> p (n a)
+traverseKeysMaybeWith :: (StaticMap m, Map n, Applicative p) => (∀ k . Typeable k => a k -> a k -> a k) -> (∀ k . Typeable k => Key m k -> p (Maybe (Key n k))) -> m a -> p (n a)
 traverseKeysMaybeWith combine f = fmap (flip appEndo empty) . foldMapWithKeyA (\ i a -> foldMap (\ j -> Endo $ insertWith combine j a) <$> f i)
 
 -- | Keys of the map
